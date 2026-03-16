@@ -11,7 +11,7 @@
 
 ## 🚀 安装指南
 1. **安装插件：** 确保你的浏览器已安装 [Tampermonkey](https://www.tampermonkey.net/) 插件。
-2. **安装脚本：** 访问 [此处添加你的脚本 raw 链接] 或在 Greasy Fork [添加发布后的链接] 点击安装。
+2. **安装脚本：** 访问 [https://github.com/yang11235/-Douban-Book-Exporter-/blob/main/douban-exporter.user.js]  点击安装。
 3. **开始使用：** - 登录你的豆瓣个人主页，进入“读过”页面（链接通常为 `https://book.douban.com/people/你的ID/collect`）。
    - 页面右上角会出现一个【开始导出】按钮。
    - 点击按钮，输入你想导出的书籍数量，脚本将自动运行。
