@@ -13,7 +13,7 @@
 
 ## 🚀 安装指南
 1. **安装插件：** 确保你的浏览器已安装 [Tampermonkey](https://www.tampermonkey.net/) 插件。
-2. **安装脚本：** 点击这里 [chrome-extension://dhdgffkkebhmkfjojejmpbldmpobfkfo/ask.html?aid=b455e9b0-950b-4007-a0e8-974e4e21a8b9] 即可自动跳转安装。
+2. **安装脚本：** 点击这里 [https://www.tampermonkey.net/script_installation.php#url=https://github.com/yang11235/-Douban-Book-Exporter-/raw/refs/heads/main/douban-exporter.user.js] 即可自动跳转安装。
 3. **开始使用：** - 登录你的豆瓣个人主页，进入“读过”页面（链接通常为 `https://book.douban.com/people/你的ID/collect`）。
    - 页面右上角会出现一个【开始导出】按钮。
    - 点击按钮，输入你想导出的书籍数量，脚本将自动运行。
