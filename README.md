@@ -23,9 +23,9 @@
 ## 安装
 
 1. 浏览器装好 [Tampermonkey](https://www.tampermonkey.net/)。
-2. 点这里安装脚本：
-   [安装 douban-exporter.user.js](https://www.tampermonkey.net/script_installation.php#url=https%3A%2F%2Fgithub.com%2Fyang11235%2F-Douban-Book-Exporter-%2Fraw%2Frefs%2Fheads%2Fmain%2Fdouban-exporter.user.js)
-3. 打开你的读过页 `https://book.douban.com/people/你的ID/collect`，右上角会出现面板。
+2. 点这里安装脚本：[douban-exporter.user.js](https://raw.githubusercontent.com/yang11235/-Douban-Book-Exporter-/main/douban-exporter.user.js) —— 正常会直接跳到 Tampermonkey 的安装页，点「安装」即可。
+3. 如果打开是一屏幕代码而不是安装页，说明 Tampermonkey 没启用，先确认扩展开着再刷新。
+4. 打开你的读过页 `https://book.douban.com/people/你的ID/collect`，右上角会出现面板。
 
 ## 使用
 
