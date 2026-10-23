@@ -40,6 +40,13 @@ test('脚本 @version 与 package.json 版本一致', () => {
     );
 });
 
+test('面板标题里的 VERSION 常量与 @version 一致', () => {
+    const head = SOURCE.match(/^\/\/ @version\s+(\S+)/m);
+    const body = SOURCE.match(/var VERSION = '([^']+)'/);
+    assert.ok(body, '缺少 VERSION 常量');
+    assert.equal(body[1], head[1], '面板上显示的版本与 @version 不一致，排查时会误导');
+});
+
 /* ---------------------------- parsePub ---------------------------- */
 
 // 豆瓣 .pub 的典型形态是「作者 / 译者 / 出版社 / 出版年 / 页数 / 定价 / 装帧」，
