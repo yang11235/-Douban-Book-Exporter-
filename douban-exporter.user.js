@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         豆瓣读过导出器 v8
 // @namespace    https://github.com/yang11235
-// @version      8.5
+// @version      8.6
 // @description  导出豆瓣"读过"列表为 CSV（书名 / 我的评分 / 作者 / 出版社 / 我的短评）：单页内翻页、按 subject id 去重、抓完自动下载
 // @author       yang11235
 // @match        https://book.douban.com/people/*/collect*
@@ -292,99 +292,12 @@
         setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
     }
 
-    /* ------------------------- UI ------------------------- */
+    /* ---------------------- 出口（仅 Node 测试用） ---------------------- */
 
-    // 元素在 initUI() 里才创建。Node 环境下 initUI 不执行，setStatus/render 退化为空操作，
-    // 这样解析逻辑能脱离浏览器单独测试（见 tests/）。
-    var panel = null;
-    var statusEl = null;
-    var runBtn = null;
-
-    function setStatus(msg) {
-        if (statusEl) statusEl.textContent = msg;
-    }
-
-    // 只有一个按钮。正常抓完会自动下载；中止/出错时这个按钮就地变成「保存已抓 N 本」，
-    // 存完再变回「开始导出」，所以既不用第二个按钮，也不会丢已抓的数据。
-    function render() {
-        if (!runBtn) return;
-        if (state.running) {
-            runBtn.textContent = '中止';
-        } else if (state.unsaved && state.rows.length) {
-            runBtn.textContent = '保存已抓 ' + state.rows.length + ' 本';
-        } else {
-            runBtn.textContent = '开始导出';
-        }
-        if (state.running && statusEl) {
-            statusEl.textContent = '已抓 ' + state.rows.length + ' 本' +
-                (state.limit === Infinity ? '' : ' / ' + state.limit);
-        }
-    }
-
-    function initUI() {
-        panel = document.createElement('div');
-        panel.style.cssText = 'position:fixed;right:20px;top:80px;z-index:2147483647;width:212px;padding:12px 14px;' +
-            'border-radius:10px;background:#fff;box-shadow:0 6px 24px rgba(0,0,0,.18);' +
-            'font:13px/1.6 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;color:#2b2b2b;';
-
-        var titleEl = document.createElement('div');
-        titleEl.textContent = '豆瓣读过导出器';
-        titleEl.style.cssText = 'font-weight:600;margin-bottom:6px;';
-
-        statusEl = document.createElement('div');
-        statusEl.style.cssText = 'color:#555;font-size:12px;min-height:34px;margin-bottom:8px;';
-
-        runBtn = document.createElement('button');
-        runBtn.style.cssText = 'width:100%;padding:8px 0;border:none;border-radius:6px;background:#2f6f4f;' +
-            'color:#fff;font-size:13px;cursor:pointer;';
-
-        panel.appendChild(titleEl);
-        panel.appendChild(statusEl);
-        panel.appendChild(runBtn);
-        document.body.appendChild(panel);
-
-        runBtn.onclick = function () {
-            if (state.running) { state.aborted = true; setStatus('正在中止…'); return; }
-
-            // 没存盘的中途数据：点一下就落盘
-            if (state.unsaved && state.rows.length) {
-                download();
-                state.unsaved = false;
-                setStatus('已保存 ' + state.rows.length + ' 本');
-                render();
-                return;
-            }
-
-            var input = prompt('导出多少本？留空 = 全部', '');
-            if (input === null) return;
-            input = input.trim();
-
-            var limit = Infinity;
-            if (input !== '') {
-                limit = parseInt(input, 10);
-                if (!isFinite(limit) || limit <= 0) { alert('请输入正整数，或留空导出全部'); return; }
-            }
-            run(limit);
-        };
-
-        // 顺手清掉 v7 留下的三个 key（v7 的 localStorage.clear() 可能已把它们抹掉，这里只是兜底）
-        ['isScraping', 'scrapeLimit', 'douban_export_data'].forEach(function (k) {
-            try { localStorage.removeItem(k); } catch (e) {}
-        });
-
-        setStatus('点「开始导出」，数量留空 = 全部；抓完自动下载');
-        render();
-    }
-
-    /* ---------------------- 出口 ---------------------- */
-
-    // 两件事分开判断、互不排斥：
-    //   1. Node（CommonJS）下没有 window，只导出内部函数供测试用，不碰 DOM；
-    //   2. 只要在浏览器里就挂面板。
-    // 写成 if/else 时，任何一边判断失误都会让另一边也不执行——面板会静默消失，且没有任何报错。
-    var IS_NODE = typeof window === 'undefined' && typeof module === 'object' && !!module.exports;
-
-    if (IS_NODE) {
+    // 只有 Node 里 require 时走这条路：导出内部函数供测试，然后立刻返回，不执行下面的 DOM 代码。
+    // 浏览器里 window 一定存在，这里恒为 false。
+    if (typeof window === 'undefined' &&
+        typeof process !== 'undefined' && process.versions && process.versions.node) {
         module.exports = {
             parsePub: parsePub,
             parseMyRating: parseMyRating,
@@ -397,14 +310,86 @@
             state: state,
             resetState: resetState
         };
+        return;
     }
 
-    if (typeof document !== 'undefined') {
-        try {
-            initUI();
-        } catch (e) {
-            // 初始化失败时不要静默：至少让控制台能看见原因
-            if (typeof console !== 'undefined') console.error('[豆瓣导出器] 面板初始化失败：', e);
+    /* ------------------------- UI ------------------------- */
+
+    // 这一段刻意留在顶层直接执行，不包进函数。
+    // v8.4 就是这样，实测可用；包成 initUI() 再调用会改变执行路径，
+    // 出现过「面板不注入且无报错」的情况，不要再改回函数。
+
+    var VERSION = '8.6';
+    if (typeof console !== 'undefined') console.log('[豆瓣导出器] v' + VERSION + ' 已加载');
+
+    var panel = document.createElement('div');
+    panel.style.cssText = 'position:fixed;right:20px;top:80px;z-index:2147483647;width:212px;padding:12px 14px;' +
+        'border-radius:10px;background:#fff;box-shadow:0 6px 24px rgba(0,0,0,.18);' +
+        'font:13px/1.6 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;color:#2b2b2b;';
+
+    var titleEl = document.createElement('div');
+    titleEl.textContent = '豆瓣读过导出器 v' + VERSION;
+    titleEl.style.cssText = 'font-weight:600;margin-bottom:6px;';
+
+    var statusEl = document.createElement('div');
+    statusEl.style.cssText = 'color:#555;font-size:12px;min-height:34px;margin-bottom:8px;';
+
+    var runBtn = document.createElement('button');
+    runBtn.style.cssText = 'width:100%;padding:8px 0;border:none;border-radius:6px;background:#2f6f4f;' +
+        'color:#fff;font-size:13px;cursor:pointer;';
+
+    panel.appendChild(titleEl);
+    panel.appendChild(statusEl);
+    panel.appendChild(runBtn);
+    document.body.appendChild(panel);
+
+    function setStatus(msg) { statusEl.textContent = msg; }
+
+    // 只有一个按钮。正常抓完会自动下载；中止/出错时这个按钮就地变成「保存已抓 N 本」，
+    // 存完再变回「开始导出」，所以既不用第二个按钮，也不会丢已抓的数据。
+    function render() {
+        if (state.running) {
+            runBtn.textContent = '中止';
+        } else if (state.unsaved && state.rows.length) {
+            runBtn.textContent = '保存已抓 ' + state.rows.length + ' 本';
+        } else {
+            runBtn.textContent = '开始导出';
+        }
+        if (state.running) {
+            statusEl.textContent = '已抓 ' + state.rows.length + ' 本' +
+                (state.limit === Infinity ? '' : ' / ' + state.limit);
         }
     }
+
+    runBtn.onclick = function () {
+        if (state.running) { state.aborted = true; setStatus('正在中止…'); return; }
+
+        // 没存盘的中途数据：点一下就落盘
+        if (state.unsaved && state.rows.length) {
+            download();
+            state.unsaved = false;
+            setStatus('已保存 ' + state.rows.length + ' 本');
+            render();
+            return;
+        }
+
+        var input = prompt('导出多少本？留空 = 全部', '');
+        if (input === null) return;
+        input = input.trim();
+
+        var limit = Infinity;
+        if (input !== '') {
+            limit = parseInt(input, 10);
+            if (!isFinite(limit) || limit <= 0) { alert('请输入正整数，或留空导出全部'); return; }
+        }
+        run(limit);
+    };
+
+    // 顺手清掉 v7 留下的三个 key（v7 的 localStorage.clear() 可能已把它们抹掉，这里只是兜底）
+    ['isScraping', 'scrapeLimit', 'douban_export_data'].forEach(function (k) {
+        try { localStorage.removeItem(k); } catch (e) {}
+    });
+
+    setStatus('点「开始导出」，数量留空 = 全部；抓完自动下载');
+    render();
 })();
