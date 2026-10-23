@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         豆瓣读过导出器 v8
 // @namespace    https://github.com/yang11235
-// @version      8.4
+// @version      8.5
 // @description  导出豆瓣"读过"列表为 CSV（书名 / 我的评分 / 作者 / 出版社 / 我的短评）：单页内翻页、按 subject id 去重、抓完自动下载
 // @author       yang11235
 // @match        https://book.douban.com/people/*/collect*
@@ -378,10 +378,13 @@
 
     /* ---------------------- 出口 ---------------------- */
 
-    // Node（CommonJS）里没有 window，浏览器里一定有。用 window 判定比只看 module 稳：
-    // @grant none 时脚本跑在页面上下文，页面自己的 module/exports 可能把判断带偏。
-    // Node 下只暴露函数供测试调用，不碰 DOM；浏览器里正常挂 UI。
-    if (typeof window === 'undefined' && typeof module === 'object' && module.exports) {
+    // 两件事分开判断、互不排斥：
+    //   1. Node（CommonJS）下没有 window，只导出内部函数供测试用，不碰 DOM；
+    //   2. 只要在浏览器里就挂面板。
+    // 写成 if/else 时，任何一边判断失误都会让另一边也不执行——面板会静默消失，且没有任何报错。
+    var IS_NODE = typeof window === 'undefined' && typeof module === 'object' && !!module.exports;
+
+    if (IS_NODE) {
         module.exports = {
             parsePub: parsePub,
             parseMyRating: parseMyRating,
@@ -394,7 +397,14 @@
             state: state,
             resetState: resetState
         };
-    } else {
-        initUI();
+    }
+
+    if (typeof document !== 'undefined') {
+        try {
+            initUI();
+        } catch (e) {
+            // 初始化失败时不要静默：至少让控制台能看见原因
+            if (typeof console !== 'undefined') console.error('[豆瓣导出器] 面板初始化失败：', e);
+        }
     }
 })();
