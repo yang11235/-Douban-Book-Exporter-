@@ -42,6 +42,19 @@
         unsaved: false       // 已抓但还没落盘的数据
     };
 
+    // 开始新一轮抓取前把状态归零。run() 和测试都走这一份，避免两处各写一套字段。
+    function resetState() {
+        state.rows = [];
+        state.seen = Object.create(null);
+        state.dupes = 0;
+        state.limit = Infinity;
+        state.running = false;
+        state.aborted = false;
+        state.error = false;
+        state.cause = '';
+        state.unsaved = false;
+    }
+
     /* ------------------------- 解析 ------------------------- */
 
     function txt(el) {
@@ -69,10 +82,11 @@
         out.author = parts[0];
 
         // 出版年宽松匹配：2011、2011-1、2011-1-1、2011.1、2011年1月 都算
+        // 定价 "2000.00元" 也会被这个正则命中，用「元」结尾排除掉
         var YEAR = /^\d{4}(\s*$|[-./年])/;
         var yearIdx = -1;
         for (var i = 1; i < parts.length; i++) {
-            if (YEAR.test(parts[i])) { yearIdx = i; break; }
+            if (YEAR.test(parts[i]) && !/元\s*$/.test(parts[i])) { yearIdx = i; break; }
         }
 
         if (yearIdx > 1) {
@@ -132,12 +146,13 @@
         return { added: added, total: items.length };
     }
 
-    function getNextUrl(doc) {
+    function getNextUrl(doc, base) {
         var a = doc.querySelector('.paginator .next a') || doc.querySelector('.next a');
         if (!a) return null;
         var href = a.getAttribute('href');
         if (!href) return null;
-        try { return new URL(href, location.href).href; } catch (e) { return null; }
+        var b = base || (typeof location !== 'undefined' ? location.href : '');
+        try { return new URL(href, b).href; } catch (e) { return null; }
     }
 
     /* ------------------------- 抓取流程 ------------------------- */
@@ -146,14 +161,8 @@
     function rand(a, b) { return Math.floor(a + Math.random() * (b - a)); }
 
     async function run(limit) {
+        resetState();
         state.running = true;
-        state.aborted = false;
-        state.error = false;
-        state.cause = '';
-        state.unsaved = false;
-        state.rows = [];
-        state.seen = Object.create(null);
-        state.dupes = 0;
         state.limit = limit;
         render();
 
@@ -210,38 +219,47 @@
             }
 
             lastUrl = nextUrl;
-            nextUrl = getNextUrl(doc);
+            nextUrl = getNextUrl(doc, lastUrl);
             page++;
             render();
         }
 
         state.running = false;
 
-        var msg;
-        if (state.aborted) {
-            msg = '已中止，当前 ' + state.rows.length + ' 本';
-        } else if (state.error) {
-            msg = '已停止：' + state.cause + '（已抓 ' + state.rows.length + ' 本）';
-        } else if (state.rows.length >= state.limit) {
-            msg = '完成：' + state.rows.length + ' 本（达到设定数量）';
-        } else {
-            msg = '完成：' + state.rows.length + ' 本（已到最后一页）';
-        }
-        if (state.dupes) msg += '，跳过重复 ' + state.dupes + ' 条';
+        var s = summarize(state);
 
         // 正常抓完就直接下载，不再要求用户点第二次。
         // 中止或中途出错时不自动下载——避免把残缺数据当成完整结果，改为把按钮切成「保存已抓 N 本」。
-        if (!state.aborted && !state.error && state.rows.length) {
+        if (s.autodownload) {
             download();
             state.unsaved = false;
-            msg += '；CSV 已开始下载';
-        } else if (state.rows.length) {
+            s.msg += '；CSV 已开始下载';
+        } else if (s.unsaved) {
             state.unsaved = true;
-            msg += '；点按钮保存已抓部分';
+            s.msg += '；点按钮保存已抓部分';
         }
 
-        setStatus(msg);
+        setStatus(s.msg);
         render();
+    }
+
+    // 抓取结束后的收尾判断：文案 + 是否自动下载 + 是否留下未保存数据。
+    // 抽成纯函数，这样「中止/出错不自动下载」这条规则能脱离浏览器单独测。
+    function summarize(st) {
+        var msg;
+        if (st.aborted) {
+            msg = '已中止，当前 ' + st.rows.length + ' 本';
+        } else if (st.error) {
+            msg = '已停止：' + st.cause + '（已抓 ' + st.rows.length + ' 本）';
+        } else if (st.rows.length >= st.limit) {
+            msg = '完成：' + st.rows.length + ' 本（达到设定数量）';
+        } else {
+            msg = '完成：' + st.rows.length + ' 本（已到最后一页）';
+        }
+        if (st.dupes) msg += '，跳过重复 ' + st.dupes + ' 条';
+
+        var auto = !st.aborted && !st.error && st.rows.length > 0;
+        return { msg: msg, autodownload: auto, unsaved: !auto && st.rows.length > 0 };
     }
 
     /* ------------------------- 导出 ------------------------- */
@@ -276,32 +294,20 @@
 
     /* ------------------------- UI ------------------------- */
 
-    var panel = document.createElement('div');
-    panel.style.cssText = 'position:fixed;right:20px;top:80px;z-index:2147483647;width:212px;padding:12px 14px;' +
-        'border-radius:10px;background:#fff;box-shadow:0 6px 24px rgba(0,0,0,.18);' +
-        'font:13px/1.6 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;color:#2b2b2b;';
+    // 元素在 initUI() 里才创建。Node 环境下 initUI 不执行，setStatus/render 退化为空操作，
+    // 这样解析逻辑能脱离浏览器单独测试（见 tests/）。
+    var panel = null;
+    var statusEl = null;
+    var runBtn = null;
 
-    var titleEl = document.createElement('div');
-    titleEl.textContent = '豆瓣读过导出器';
-    titleEl.style.cssText = 'font-weight:600;margin-bottom:6px;';
-
-    var statusEl = document.createElement('div');
-    statusEl.style.cssText = 'color:#555;font-size:12px;min-height:34px;margin-bottom:8px;';
-
-    var runBtn = document.createElement('button');
-    runBtn.style.cssText = 'width:100%;padding:8px 0;border:none;border-radius:6px;background:#2f6f4f;' +
-        'color:#fff;font-size:13px;cursor:pointer;';
-
-    panel.appendChild(titleEl);
-    panel.appendChild(statusEl);
-    panel.appendChild(runBtn);
-    document.body.appendChild(panel);
-
-    function setStatus(msg) { statusEl.textContent = msg; }
+    function setStatus(msg) {
+        if (statusEl) statusEl.textContent = msg;
+    }
 
     // 只有一个按钮。正常抓完会自动下载；中止/出错时这个按钮就地变成「保存已抓 N 本」，
     // 存完再变回「开始导出」，所以既不用第二个按钮，也不会丢已抓的数据。
     function render() {
+        if (!runBtn) return;
         if (state.running) {
             runBtn.textContent = '中止';
         } else if (state.unsaved && state.rows.length) {
@@ -309,41 +315,86 @@
         } else {
             runBtn.textContent = '开始导出';
         }
-        if (state.running) {
+        if (state.running && statusEl) {
             statusEl.textContent = '已抓 ' + state.rows.length + ' 本' +
                 (state.limit === Infinity ? '' : ' / ' + state.limit);
         }
     }
 
-    runBtn.onclick = function () {
-        if (state.running) { state.aborted = true; setStatus('正在中止…'); return; }
+    function initUI() {
+        panel = document.createElement('div');
+        panel.style.cssText = 'position:fixed;right:20px;top:80px;z-index:2147483647;width:212px;padding:12px 14px;' +
+            'border-radius:10px;background:#fff;box-shadow:0 6px 24px rgba(0,0,0,.18);' +
+            'font:13px/1.6 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;color:#2b2b2b;';
 
-        // 没存盘的中途数据：点一下就落盘
-        if (state.unsaved && state.rows.length) {
-            download();
-            state.unsaved = false;
-            setStatus('已保存 ' + state.rows.length + ' 本');
-            render();
-            return;
-        }
+        var titleEl = document.createElement('div');
+        titleEl.textContent = '豆瓣读过导出器';
+        titleEl.style.cssText = 'font-weight:600;margin-bottom:6px;';
 
-        var input = prompt('导出多少本？留空 = 全部', '');
-        if (input === null) return;
-        input = input.trim();
+        statusEl = document.createElement('div');
+        statusEl.style.cssText = 'color:#555;font-size:12px;min-height:34px;margin-bottom:8px;';
 
-        var limit = Infinity;
-        if (input !== '') {
-            limit = parseInt(input, 10);
-            if (!isFinite(limit) || limit <= 0) { alert('请输入正整数，或留空导出全部'); return; }
-        }
-        run(limit);
-    };
+        runBtn = document.createElement('button');
+        runBtn.style.cssText = 'width:100%;padding:8px 0;border:none;border-radius:6px;background:#2f6f4f;' +
+            'color:#fff;font-size:13px;cursor:pointer;';
 
-    // 顺手清掉 v7 留下的三个 key（v7 的 localStorage.clear() 可能已把它们抹掉，这里只是兜底）
-    ['isScraping', 'scrapeLimit', 'douban_export_data'].forEach(function (k) {
-        try { localStorage.removeItem(k); } catch (e) {}
-    });
+        panel.appendChild(titleEl);
+        panel.appendChild(statusEl);
+        panel.appendChild(runBtn);
+        document.body.appendChild(panel);
 
-    setStatus('点「开始导出」，数量留空 = 全部；抓完自动下载');
-    render();
+        runBtn.onclick = function () {
+            if (state.running) { state.aborted = true; setStatus('正在中止…'); return; }
+
+            // 没存盘的中途数据：点一下就落盘
+            if (state.unsaved && state.rows.length) {
+                download();
+                state.unsaved = false;
+                setStatus('已保存 ' + state.rows.length + ' 本');
+                render();
+                return;
+            }
+
+            var input = prompt('导出多少本？留空 = 全部', '');
+            if (input === null) return;
+            input = input.trim();
+
+            var limit = Infinity;
+            if (input !== '') {
+                limit = parseInt(input, 10);
+                if (!isFinite(limit) || limit <= 0) { alert('请输入正整数，或留空导出全部'); return; }
+            }
+            run(limit);
+        };
+
+        // 顺手清掉 v7 留下的三个 key（v7 的 localStorage.clear() 可能已把它们抹掉，这里只是兜底）
+        ['isScraping', 'scrapeLimit', 'douban_export_data'].forEach(function (k) {
+            try { localStorage.removeItem(k); } catch (e) {}
+        });
+
+        setStatus('点「开始导出」，数量留空 = 全部；抓完自动下载');
+        render();
+    }
+
+    /* ---------------------- 出口 ---------------------- */
+
+    // Node（CommonJS）里没有 window，浏览器里一定有。用 window 判定比只看 module 稳：
+    // @grant none 时脚本跑在页面上下文，页面自己的 module/exports 可能把判断带偏。
+    // Node 下只暴露函数供测试调用，不碰 DOM；浏览器里正常挂 UI。
+    if (typeof window === 'undefined' && typeof module === 'object' && module.exports) {
+        module.exports = {
+            parsePub: parsePub,
+            parseMyRating: parseMyRating,
+            parseItem: parseItem,
+            collectFromDoc: collectFromDoc,
+            getNextUrl: getNextUrl,
+            toCSV: toCSV,
+            esc: esc,
+            summarize: summarize,
+            state: state,
+            resetState: resetState
+        };
+    } else {
+        initUI();
+    }
 })();

@@ -1,0 +1,16 @@
+{
+  "name": "douban-book-exporter",
+  "version": "8.4.0",
+  "private": true,
+  "description": "豆瓣「读过」列表导出为 CSV 的 Tampermonkey 脚本",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "jsdom": "^25.0.1"
+  }
+}
